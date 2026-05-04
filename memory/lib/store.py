@@ -722,15 +722,17 @@ class MemoryStore:
                         fp.unlink()
                         result["deleted"] += 1
 
-        # Clean up old archives
+        # Clean up old archives — never delete permanent episodes
         for layer in range(4):
             archive_dir = self.layers_path / f"l{layer}" / "archived"
             if archive_dir.exists():
                 for fp in archive_dir.glob("*.md"):
-                    # Delete archives older than 1 year
                     try:
                         mtime = datetime.fromtimestamp(fp.stat().st_mtime, timezone.utc)
                         if (now - mtime).days > 365:
+                            ep = self._parse_file(fp)
+                            if ep and ep.is_permanent:
+                                continue
                             fp.unlink()
                     except:
                         pass

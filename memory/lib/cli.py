@@ -379,9 +379,13 @@ def cmd_save_index(args):
     episode_id = f"idx_{level}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{name}"
 
     # If updating an existing entry for this path+level, delete the stale one first
+    # Never delete permanent episodes — they require explicit `huh forget --force`
     if source_path:
         existing = _find_index_episodes(store, source_path, level)
         for ep in existing:
+            if ep.is_permanent:
+                print(f"⚠ Skipping permanent episode {ep.id} — use `huh forget {ep.id} --force` to remove it first")
+                return
             store.delete_episode(ep.id)
 
     ep = MemoryEpisode(

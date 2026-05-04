@@ -441,9 +441,8 @@ class MemoryHookHandler:
         file_path_str = str(Path(file_path).resolve())
         for ep in self.store.list_episodes():
             if ep.source_path == file_path_str and ep.category.startswith("code_index"):
-                if "stale" not in (ep.tags or []):
+                if "stale" not in (ep.tags or []) and not ep.is_permanent:
                     ep.tags = list(ep.tags or []) + ["stale"]
-                    # Re-save with stale tag — delete and rewrite
                     self.store.delete_episode(ep.id)
                     self.store.save_episode(ep)
 
