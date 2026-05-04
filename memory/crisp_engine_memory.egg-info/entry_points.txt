@@ -1,0 +1,3 @@
+[console_scripts]
+crisp-hook = lib.hooks:main
+crisp-sense = lib.crisp_sense:main
