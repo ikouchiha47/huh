@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .indexer_common import IMediaIndexer, IndexResult, compute_file_hash, is_source_file
+from ..analyzer import CodeAnalyzer
 
 
 class CodeIndexer(IMediaIndexer):
@@ -156,33 +157,53 @@ class CodeIndexer(IMediaIndexer):
         return symbol
     
     def _generate_summary(self, elements: List[Any], file_path: Path) -> str:
-        """Generate 2-3 sentence summary of the file."""
+        """Build a structured summary: purpose line + symbol inventory."""
         if not elements:
-            return f"{file_path.name} - no code elements detected"
-        
-        # Count by type
-        by_type = {}
-        for elem in elements:
-            by_type[elem.type] = by_type.get(elem.type, 0) + 1
-        
-        # Build description
-        parts = []
-        if "class" in by_type:
-            parts.append(f"{by_type['class']} class(es)")
-        if "function" in by_type:
-            parts.append(f"{by_type['function']} function(s)")
-        if "method" in by_type:
-            parts.append(f"{by_type['method']} method(s)")
-        if "constant" in by_type:
-            parts.append(f"{by_type['constant']} constant(s)")
-        
-        if parts:
-            summary = f"{file_path.name} defines " + ", ".join(parts) + "."
-            if len(elements) > 10:
-                summary += f" Total: {len(elements)} symbols extracted."
-            return summary
-        else:
-            return f"{file_path.name} - {len(elements)} symbols found"
+            return f"{file_path.name}: no code elements detected."
+
+        classes   = [e for e in elements if e.type == "class"]
+        functions = [e for e in elements if e.type == "function"]
+        methods   = [e for e in elements if e.type == "method"]
+        variables = [e for e in elements if e.type in ("variable", "constant")]
+
+        lines: List[str] = []
+
+        # Purpose: first docstring found, or inferred from filename
+        purpose = ""
+        for e in elements:
+            if e.docstring and len(e.docstring) > 20:
+                purpose = e.docstring.split("\n")[0].strip().rstrip(".")
+                break
+        if not purpose:
+            stem = file_path.stem
+            # CamelCase or camelCase → words
+            words = re.sub(r"([A-Z])", r" \1", stem).strip().lower()
+            purpose = f"Module providing {words} functionality"
+
+        lines.append(f"{file_path.name}: {purpose}.")
+
+        # Classes with their methods
+        if classes:
+            for cls in classes:
+                cls_methods = [e.name for e in methods
+                               if e.start_line > cls.start_line and e.end_line <= cls.end_line]
+                method_str = (", ".join(cls_methods[:8])
+                              + (" …" if len(cls_methods) > 8 else "")) if cls_methods else "no methods"
+                lines.append(f"  class {cls.name}: {method_str}")
+
+        # Standalone functions — show names + brief sig
+        if functions:
+            fn_names = [e.name for e in functions]
+            lines.append(f"  functions: {', '.join(fn_names[:12])}"
+                         + (" …" if len(fn_names) > 12 else ""))
+
+        # Variables / constants
+        if variables:
+            var_names = [e.name for e in variables[:10]]
+            lines.append(f"  constants/vars: {', '.join(var_names)}"
+                         + (" …" if len(variables) > 10 else ""))
+
+        return "\n".join(lines)
 
     def extract_episodes(self, index_result: IndexResult) -> List[Dict[str, Any]]:
         """Convert code symbols into episodic memory entries.

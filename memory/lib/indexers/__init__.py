@@ -111,10 +111,10 @@ class IndexerRegistry:
         if context and "store" in context and hasattr(indexer, "extract_episodes"):
             episodes = indexer.extract_episodes(result)
             store = context["store"]
+            session_id = context.get("session_id", "indexer_cli")
             for ep_data in episodes:
-                # Create MemoryEpisode from dict
                 from ..store import MemoryEpisode
-                ep = MemoryEpisode(**ep_data)
+                ep = MemoryEpisode(session_id=session_id, **ep_data)
                 store.save_episode(ep)
         
         return result

@@ -42,13 +42,17 @@ class MemoryHookHandler:
     # ── Claude Code native translators ────────────────────────────────────────
 
     def handle_claude_post_tool(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Translate PostToolUse payload → FileChange handler."""
+        """Translate PostToolUse payload → FileChange or Read handler."""
         tool = data.get("tool_name", "")
+        tool_input = data.get("tool_input", {})
+        file_path = tool_input.get("file_path", "")
+
+        if tool == "Read":
+            return self.handle_claude_post_read(data)
+
         if tool not in ("Write", "Edit", "MultiEdit"):
             return {"status": "ignored", "reason": f"tool {tool} not tracked"}
 
-        tool_input = data.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
         if not file_path:
             return {"status": "ignored", "reason": "no file_path"}
 
@@ -58,12 +62,58 @@ class MemoryHookHandler:
         diff = self._git_diff(file_path)
         change_type = "create" if tool == "Write" else "edit"
 
+        # Mark existing code_index entries for this file as stale
+        self._mark_index_stale(file_path)
+
         return self.handle_file_change({
             "session_id": data.get("session_id", "unknown"),
             "file_path": file_path,
             "change_type": change_type,
             "diff": diff,
         })
+
+    def handle_claude_post_read(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """PostToolUse(Read) — lazy structural index if file not yet indexed."""
+        tool_input = data.get("tool_input", {})
+        file_path = tool_input.get("file_path", "")
+        if not file_path or Path(file_path).suffix not in SOURCE_EXTENSIONS:
+            return {"status": "ignored", "reason": "not a source file"}
+
+        file_path_str = str(Path(file_path).resolve())
+
+        # Check if already indexed and fresh (not stale)
+        existing = [
+            ep for ep in self.store.list_episodes()
+            if ep.source_path == file_path_str
+            and ep.category.startswith("code_index")
+            and "stale" not in (ep.tags or [])
+        ]
+        if existing:
+            return {"status": "ignored", "reason": "already indexed"}
+
+        # Lazy structural index — symbols only, no semantic summary
+        try:
+            from lib.indexers import IndexerRegistry
+            registry = IndexerRegistry()
+            indexer = registry.get_indexer(Path(file_path))
+            if indexer is None:
+                return {"status": "ignored", "reason": "no indexer"}
+
+            result = indexer.index(Path(file_path))
+            session_id = data.get("session_id", "unknown")
+            episodes = indexer.extract_episodes(result)
+            saved = 0
+            for ep_data in episodes:
+                ep = MemoryEpisode(session_id=session_id, **ep_data)
+                if self.store.save_episode(ep):
+                    saved += 1
+
+            # Ensure dir index entry exists (up to 3 levels from project root)
+            self._ensure_dir_entries(file_path_str, session_id)
+
+            return {"status": "indexed", "file": file_path, "episodes": saved}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     def handle_claude_stop(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Translate Stop payload → Stop handler."""
@@ -385,6 +435,73 @@ class MemoryHookHandler:
             trigger_type="error_recovery", root_cause=error,
             lesson=f"Tool {tool_name} failed — investigate root cause",
         )
+
+    def _mark_index_stale(self, file_path: str) -> None:
+        """Mark all code_index episodes for this file as stale."""
+        file_path_str = str(Path(file_path).resolve())
+        for ep in self.store.list_episodes():
+            if ep.source_path == file_path_str and ep.category.startswith("code_index"):
+                if "stale" not in (ep.tags or []):
+                    ep.tags = list(ep.tags or []) + ["stale"]
+                    # Re-save with stale tag — delete and rewrite
+                    self.store.delete_episode(ep.id)
+                    self.store.save_episode(ep)
+
+    def _ensure_dir_entries(self, file_path: str, session_id: str) -> None:
+        """Create placeholder dir index entries for up to 3 levels above the file.
+
+        Uses file_states cache (O(1) per dir) to avoid scanning all episodes.
+        """
+        p = Path(file_path).resolve()
+
+        # Detect project root (git root or cwd)
+        root = p
+        for ancestor in p.parents:
+            if (ancestor / ".git").exists():
+                root = ancestor
+                break
+
+        # Walk from file's parent up, capped at 3 levels from root
+        dirs_to_ensure = []
+        current = p.parent
+        for _ in range(3):
+            if current == root or current == current.parent:
+                break
+            try:
+                depth = len(current.relative_to(root).parts)
+            except ValueError:
+                break
+            if depth > 3:
+                break
+            dirs_to_ensure.append(current)
+            current = current.parent
+
+        for d in dirs_to_ensure:
+            d_str = str(d)
+            try:
+                rel = str(d.relative_to(root))
+            except ValueError:
+                rel = d_str
+            cache_key = f"dir_indexed:{rel}"
+            # Fast O(1) check via file_states cache
+            if self.store.get_file_state(cache_key):
+                continue
+
+            ep = MemoryEpisode(
+                id=f"idx_dir_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{d.name}",
+                session_id=session_id,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                layer=1,
+                title=f"[dir] {d.name}",
+                content=f"DIR: {d_str}\n(placeholder — awaiting semantic summary from /index skill)",
+                source_type="code_index",
+                source_path=d_str,
+                category="code_index_dir",
+                importance=0.6,
+                tags=["code_index", "dir", "placeholder"],
+            )
+            self.store.save_episode(ep)
+            self.store.set_file_state(cache_key, "1")
 
     def _create_checkpoint(self, session_id: str, episodes: list):
         categories: Dict[str, int] = {}

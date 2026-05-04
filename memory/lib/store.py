@@ -224,7 +224,7 @@ class MemoryStore:
     def _load_config(self) -> Dict[str, Any]:
         """Load or create default config."""
         default = {
-            "decay_half_life_days": {"l0": 30, "l1": 180, "l2": 730, "l3": 2190},
+            "decay_half_life_days": {"l0": 1, "l1": 7, "l2": 30, "l3": 36500},
             "importance_threshold": 0.3,
             "similarity_threshold": 0.92,
             "access_boost_days": 7,
