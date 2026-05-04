@@ -158,8 +158,12 @@ def cmd_show(args):
 
 
 def cmd_forget(args):
-    """Delete episode."""
+    """Delete episode. Requires --force for permanent episodes."""
     store = get_store()
+    ep = store.read_episode(args.id)
+    if ep and ep.is_permanent and not args.force:
+        print(f"⛔ Episode {args.id} is permanent. Use --force to delete it.")
+        return
     if store.delete_episode(args.id):
         print(f"✓ Deleted episode: {args.id}")
     else:
@@ -767,6 +771,7 @@ def main():
     # Forget
     forget_parser = subparsers.add_parser("forget", help="Delete episode")
     forget_parser.add_argument("id", help="Episode ID")
+    forget_parser.add_argument("--force", action="store_true", help="Delete even if permanent")
 
     # Stats
     subparsers.add_parser("stats", help="Show statistics")
