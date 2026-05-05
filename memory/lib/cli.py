@@ -310,7 +310,32 @@ def cmd_index(args):
         sys.exit(1)
 
     if args.json:
-        # Machine-readable output for skill consumption
+        # Extract imports via tree-sitter
+        try:
+            from lib.ts_parser import parse_imports
+            raw_imports = parse_imports(file_path)
+        except Exception:
+            raw_imports = []
+
+        # Resolve and deduplicate imports (same path may appear multiple times)
+        seen: dict[str, dict] = {}
+        for imp in raw_imports:
+            path = imp["path"]
+            if path not in seen:
+                entry = dict(imp)
+                if imp.get("local") and path:
+                    base = file_path.parent
+                    for ext in ("", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".cpp", ".h"):
+                        candidate = (base / (path + ext)).resolve()
+                        if candidate.exists():
+                            entry["resolved"] = str(candidate)
+                            break
+                seen[path] = entry
+            else:
+                # merge names from duplicate import lines
+                seen[path]["names"] = list(set(seen[path].get("names", []) + imp.get("names", [])))
+        imports = list(seen.values())
+
         out = {
             "file": str(file_path),
             "media_type": result.media_type,
@@ -318,6 +343,7 @@ def cmd_index(args):
             "symbols": result.symbols,
             "hierarchy": result.hierarchy,
             "metadata": result.metadata,
+            "imports": imports,
         }
         print(json.dumps(out, indent=2))
         return

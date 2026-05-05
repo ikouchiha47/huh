@@ -3,6 +3,7 @@
 Extracts functions, classes, methods, and their relationships from
 source code files. Supports tree-sitter (if available) or regex fallback.
 """
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 

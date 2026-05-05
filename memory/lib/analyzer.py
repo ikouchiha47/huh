@@ -413,11 +413,22 @@ class CodeAnalyzer:
     def analyze_file(self, file_path: str) -> List[CodeElement]:
         """Analyze a source file and extract all code elements."""
         file_path = str(Path(file_path).resolve())
-        language = self._get_language(file_path)
+        fp = Path(file_path)
 
+        # Try tree-sitter first (has its own extension mapping, wider coverage)
+        try:
+            from .ts_parser import parse_file
+            result = parse_file(fp)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+        language = self._get_language(file_path)
         if not language:
             return []
 
+        # Regex fallback
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -432,7 +443,6 @@ class CodeAnalyzer:
         else:
             elements = self._extract_generic_structure(lines, file_path, language)
 
-        # Compute hashes
         for elem in elements:
             elem.compute_hash()
 
