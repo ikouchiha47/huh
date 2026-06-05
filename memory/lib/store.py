@@ -65,6 +65,11 @@ class MemoryEpisode:
     # Derived
     embedding: List[float] = field(default_factory=list)
 
+    # Instinct / continuous-learning: confidence in a reinforced behavior (0.0-1.0).
+    # Only meaningful for category="instinct" episodes; 0.0 elsewhere (and dropped
+    # from frontmatter by the zero-default cleaning below).
+    confidence: float = 0.0
+
     def to_frontmatter(self) -> str:
         """Convert to YAML frontmatter string."""
         data = asdict(self)
@@ -231,9 +236,26 @@ class MemoryStore:
             "archive_threshold_days": 90,
             "delete_threshold_days": 365,
             "reflection_interval": 20,
-            "embedding_model": "all-MiniLM-L6-v2",
+            # Embeddings (used only by the USER-TRIGGERED `search --semantic` path).
+            # Default provider is "mock" so nothing hits the network automatically.
+            # Switch to "ollama" + set model/url to enable real semantic search.
+            "embedding_provider": "mock",  # mock | ollama
+            "embedding_model": "qllama/bge-large-en-v1.5:latest",
+            "embedding_api_url": "http://localhost:11434/api/embeddings",
+            "embedding_dim": 1024,
             "use_local_embeddings": True,
             "pii_scrubbing": True,
+            # Continuous-learning instinct engine (lib/instincts.py).
+            "instincts": {
+                "enabled": True,
+                "min_observations": 20,   # buffer size before analyze() distills
+                "min_pattern_count": 3,   # times a signature must recur to instinct
+                "base_confidence": 0.3,   # confidence of a freshly distilled instinct
+                "reinforce_step": 0.1,    # +confidence when a pattern recurs
+                "decay_step": 0.05,       # -confidence on contradiction
+                "evolve_threshold": 0.8,  # min confidence to evolve into an artifact
+                "promote_min_projects": 2,  # distinct projects before project->global
+            },
         }
         if self.config_file.exists():
             with open(self.config_file) as f:
@@ -395,6 +417,24 @@ class MemoryStore:
             self._save_hash_cache()
 
         return True
+
+    def update_episode(self, episode: MemoryEpisode) -> None:
+        """Persist in-place changes to an existing episode (no dedup check).
+
+        Used when mutating metadata such as instinct confidence/access without
+        creating a new episode. Refreshes the content-hash cache if content moved.
+        """
+        if episode.content:
+            new_hash = self.compute_hash(episode.content)
+            if new_hash != episode.content_hash:
+                # content changed: drop the stale hash mapping, register the new one
+                self.hash_cache = {
+                    k: v for k, v in self.hash_cache.items() if v != episode.id
+                }
+                episode.content_hash = new_hash
+            self.hash_cache[episode.content_hash] = episode.id
+            self._save_hash_cache()
+        self._write_raw(episode)
 
     def _get_episode_id_for_file(self, file_path: str) -> Optional[str]:
         """Find episode ID for a given file path (uses hashed lookup)."""

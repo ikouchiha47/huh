@@ -72,8 +72,10 @@ def cmd_save(args):
 
 
 def cmd_search(args):
-    """Search memory."""
+    """Search memory (default: keyword/structured; --semantic: embeddings)."""
     store = get_store()
+    if getattr(args, "semantic", False):
+        return _semantic_search(store, args.query, args.limit)
     from lib.retrieve import RetrievalOrchestrator
 
     orchestrator = RetrievalOrchestrator(store)
@@ -776,6 +778,130 @@ def cmd_switch(args):
     print()
 
 
+def _semantic_search(store, query, limit):
+    """USER-TRIGGERED embedding search.
+
+    Storage is deferred (no vector index yet): vectors are computed on the fly via
+    the configured provider (mock by default). Real semantic results require
+    embedding_provider=ollama in config. Falls back to keyword search on failure.
+    """
+    from lib.embeddings import get_provider, cosine
+
+    provider = get_provider(store.config)
+    is_mock = type(provider).__name__ == "MockEmbeddingProvider"
+    try:
+        qv = provider.embed(query)
+    except Exception as e:
+        print(f"Embedding unavailable ({e}); use plain `search` (keyword/rg).", file=sys.stderr)
+        sys.exit(1)
+
+    scored = []
+    for ep in store.list_episodes():
+        text = f"{ep.title}\n{ep.content}".strip()
+        if not text:
+            continue
+        try:
+            scored.append((ep, cosine(qv, provider.embed(text))))
+        except Exception as e:
+            print(f"Embedding failed ({e}); falling back to keyword search.", file=sys.stderr)
+            from lib.retrieve import RetrievalOrchestrator
+
+            for ep2, score in RetrievalOrchestrator(store).search(query, limit=limit):
+                print(f"[{ep2.layer}] {score:.2f}  {ep2.id}  {ep2.title}")
+            return
+    scored.sort(key=lambda t: t[1], reverse=True)
+
+    if is_mock:
+        print("⚠ embedding_provider=mock — results are NOT semantically meaningful.", file=sys.stderr)
+        print("  Set embedding_provider=ollama (+ model/url) in config to enable real search.", file=sys.stderr)
+    print(f"\nSemantic results ({len(scored[:limit])}):\n")
+    for ep, score in scored[:limit]:
+        print(f"--- [{ep.layer}] cos {score:.3f} ---")
+        print(f"ID: {ep.id}")
+        print(f"Title: {ep.title}")
+        print(f"{ep.content[:200]}{'...' if len(ep.content) > 200 else ''}\n")
+
+
+def cmd_observe(args):
+    """(internal) Ingest a tool-use event (JSON on stdin) into the instinct engine.
+
+    Called by hooks. Quiet and non-blocking by design — never fails the tool.
+    """
+    from lib.instincts import InstinctEngine
+
+    raw = ""
+    try:
+        if not sys.stdin.isatty():
+            raw = sys.stdin.read()
+    except Exception:
+        raw = ""
+    try:
+        event = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        event = {}
+    if getattr(args, "phase", None):
+        event.setdefault("phase", args.phase)
+
+    try:
+        ie = InstinctEngine(get_store())
+        ie.observe(event)
+        if getattr(args, "analyze", False):
+            res = ie.analyze(force=getattr(args, "force", False))
+            if res.get("created") or res.get("reinforced"):
+                print(json.dumps(res))
+    except Exception:
+        pass  # never block the tool on a memory hiccup
+    sys.exit(0)
+
+
+def cmd_instinct(args):
+    """Inspect and manage continuous-learning instincts."""
+    from lib.instincts import InstinctEngine
+
+    ie = InstinctEngine(get_store())
+    action = getattr(args, "action", None)
+
+    if action == "list":
+        items = ie.list_instincts(scope=args.scope, min_confidence=args.min_confidence)
+        if not items:
+            print("No instincts yet — they form as tool-use patterns recur.")
+            return
+        print(f"\n{len(items)} instinct(s):\n")
+        for e in items:
+            ctx = e.context_snapshot or {}
+            projects = len(ctx.get("projects", []))
+            obs = ctx.get("observations", "?")
+            perm = " *global" if e.is_permanent else ""
+            print(f"  [{e.confidence:.2f}] {e.title:18} obs={obs} projects={projects}{perm}  {e.id}")
+    elif action == "analyze":
+        print(json.dumps(ie.analyze(force=getattr(args, "force", False)), indent=2))
+    elif action == "show":
+        e = ie.store.get_episode(args.id)
+        if not e:
+            print("Not found.")
+            return
+        print(json.dumps(
+            {"id": e.id, "title": e.title, "confidence": e.confidence,
+             "content": e.content, "context": e.context_snapshot, "tags": e.tags},
+            indent=2))
+    elif action == "reinforce":
+        c = ie.reinforce(args.id)
+        print(f"confidence -> {c:.2f}" if c is not None else "Not found.")
+    elif action == "weaken":
+        c = ie.weaken(args.id)
+        print(f"confidence -> {c:.2f}" if c is not None else "Not found.")
+    elif action == "forget":
+        print("✓ removed" if ie.store.delete_episode(args.id) else "Not found.")
+    elif action == "evolve":
+        path = ie.evolve(instinct_ids=args.ids or None, kind=args.kind, name=args.name)
+        print(f"✓ evolved -> {path}" if path else "No instincts met the evolve threshold.")
+    elif action == "promote":
+        print("✓ promoted to global" if ie.promote(args.id)
+              else "Not enough distinct projects to promote yet.")
+    else:
+        print("Usage: huh instinct <list|analyze|show|reinforce|weaken|forget|evolve|promote>")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Memory management CLI")
     subparsers = parser.add_subparsers(dest="command", help="Command")
@@ -793,6 +919,12 @@ def main():
     search_parser = subparsers.add_parser("search", help="Search memory")
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--limit", type=int, default=20, help="Result limit")
+    search_parser.add_argument(
+        "--semantic",
+        action="store_true",
+        help="USER-TRIGGERED embedding search (configurable provider; mock by default). "
+        "Plain search uses keyword/structured retrieval.",
+    )
 
     # Show
     show_parser = subparsers.add_parser("show", help="Show episode")
@@ -878,6 +1010,35 @@ def main():
     switch_parser = subparsers.add_parser("switch", help="Switch to project memory")
     switch_parser.add_argument("project_id", help="Project ID")
 
+    # Observe (internal: hooks pipe a tool-use event as JSON on stdin)
+    obs_parser = subparsers.add_parser("observe", help="(internal) ingest a tool-use event from stdin")
+    obs_parser.add_argument("--phase", help="pre | post")
+    obs_parser.add_argument("--analyze", action="store_true", help="distill after observing")
+    obs_parser.add_argument("--force", action="store_true", help="force distillation")
+
+    # Instinct (continuous learning)
+    inst_parser = subparsers.add_parser("instinct", help="Continuous-learning instincts")
+    inst_sub = inst_parser.add_subparsers(dest="action")
+    il = inst_sub.add_parser("list", help="List instincts by confidence")
+    il.add_argument("--scope", help="Filter by scope tag (project key or 'global')")
+    il.add_argument("--min-confidence", type=float, default=0.0, dest="min_confidence")
+    ia = inst_sub.add_parser("analyze", help="Distill observation buffer now")
+    ia.add_argument("--force", action="store_true", help="ignore min_observations")
+    ish = inst_sub.add_parser("show", help="Show an instinct")
+    ish.add_argument("id")
+    ir = inst_sub.add_parser("reinforce", help="+confidence")
+    ir.add_argument("id")
+    iw = inst_sub.add_parser("weaken", help="-confidence")
+    iw.add_argument("id")
+    ifg = inst_sub.add_parser("forget", help="Delete an instinct")
+    ifg.add_argument("id")
+    iev = inst_sub.add_parser("evolve", help="Emit a skill/command/agent from instincts")
+    iev.add_argument("ids", nargs="*", help="Instinct IDs (default: all >= evolve_threshold)")
+    iev.add_argument("--kind", default="skill", choices=["skill", "command", "agent"])
+    iev.add_argument("--name", help="Artifact name")
+    ip = inst_sub.add_parser("promote", help="Promote an instinct project->global")
+    ip.add_argument("id")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -903,6 +1064,8 @@ def main():
         "tree": cmd_tree,
         "projects": cmd_projects,
         "switch": cmd_switch,
+        "observe": cmd_observe,
+        "instinct": cmd_instinct,
     }
 
     try:

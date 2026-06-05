@@ -8,10 +8,10 @@ install:
 
 link:
 	mkdir -p $(SKILLS_DST)
-	ln -sf $(SKILLS_SRC)/huh $(SKILLS_DST)/huh
-	@echo "Linked $(SKILLS_SRC)/huh -> $(SKILLS_DST)/huh"
+	ln -sf $(SKILLS_SRC)/memory $(SKILLS_DST)/memory
+	@echo "Linked $(SKILLS_SRC)/memory -> $(SKILLS_DST)/memory"
 
 unlink:
-	rm -f $(SKILLS_DST)/huh
+	rm -f $(SKILLS_DST)/memory
 
 dev: install link

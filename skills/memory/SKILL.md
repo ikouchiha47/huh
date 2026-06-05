@@ -1,6 +1,6 @@
 ---
-name: huh
-description: Crisp Engine episodic memory. Use for indexing files into memory, recording changelogs on milestones or breakthroughs, searching memory before reading a file, showing project tree with index status, and memory stats/search/reflect/prune.
+name: memory
+description: Crisp Engine episodic memory. Use for indexing files into memory, recording changelogs on milestones or breakthroughs, searching memory before reading a file, showing project tree with index status, memory stats/search/reflect/prune, and continuous-learning instincts. Triggers on: remember this, save to memory, what do you remember, recall, what's indexed, index this file, changelog, milestone, it works now, finished a feature, search memory, what have I learned, what are my habits here, instinct, instincts, evolve instinct, memory stats, reflect, prune.
 when_to_use: Invoke automatically when the user says something works, hits a milestone, finishes a feature, asks what's indexed, or asks to index/document a file. Invoke before reading a large file to check if a summary exists.
 allowed-tools: Bash
 ---
@@ -19,10 +19,19 @@ Triggers: `milestone`, `finally-works`, `major-change`, `pre-compact`, `session-
 Record what changed, why it matters, and the outcome.
 
 ### `search <query>`
-Run `huh search "<query>" --limit 20` and summarize the top results — title, layer, importance, first 2 sentences of content.
+Run `huh search "<query>" --limit 20` and summarize the top results — title, layer, importance, first 2 sentences of content. This is keyword/structured retrieval (cheap, safe to run anytime).
+**Semantic (embedding) search is USER-TRIGGERED only:** run `huh search "<query>" --semantic` *only* when the user explicitly asks for semantic/vector search. The provider is configurable (mock by default; set `embedding_provider: ollama` + model/url in config). Never use `--semantic` automatically.
+When you need to grep the raw store or repo yourself, follow the tool discipline in [search.md](search.md) (`rg` → `sed`/`awk` → `grep`, probe flags first).
 
 ### `search-path <path>`
 See [search.md](search.md). Check if a file or directory is already indexed before reading it.
+
+### `instinct <list|analyze|show|reinforce|weaken|forget|evolve|promote>`
+See [instincts.md](instincts.md). Continuous-learning behaviors distilled from tool-use.
+- `huh instinct list` — show learned instincts by confidence.
+- `huh instinct analyze [--force]` — distill the observation buffer now (runs automatically on Stop/SessionEnd).
+- `huh instinct evolve [ids…]` — emit a skill/command/agent from high-confidence instincts.
+- `huh instinct promote <id>` — graduate a project instinct to global (seen in ≥2 projects).
 
 ### `tree [path]`
 See [tree.md](tree.md). Show project structure with index status markers.
@@ -60,5 +69,5 @@ When deciding what layer to write to or what decay to expect, see:
 
 ---
 
-If no subcommand matches, show: `Usage: /huh <index|changelog|search|search-path|tree|stats|reflect|prune|save|save-index>`.
+If no subcommand matches, show: `Usage: /memory <index|changelog|search|search-path|tree|stats|reflect|prune|save|save-index|instinct>`.
 Always show the raw CLI output after running any command.

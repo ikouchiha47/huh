@@ -546,14 +546,51 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     result: Dict[str, Any] = {"status": "ok"}
 
+    def _instincts():
+        # Resolve the SAME per-project store the CLI uses (get_memory_store
+        # auto-detects the project root), so hook-recorded instincts are visible
+        # to `huh instinct list` run inside that project. Falls back to global.
+        from lib.instincts import InstinctEngine
+        from lib.project_memory import get_memory_store
+        cwd = data.get("cwd") or data.get("project_dir")
+        try:
+            pstore = get_memory_store(cwd) if cwd else get_memory_store()
+        except Exception:
+            pstore = store
+        return InstinctEngine(pstore)
+
+    def _observe(phase: str):
+        """Record a tool-use observation. Guarded: never break the hook."""
+        try:
+            _instincts().observe({**data, "phase": phase})
+        except Exception:
+            pass
+
+    def _distill():
+        try:
+            return _instincts().analyze()
+        except Exception:
+            return None
+
     try:
-        if cmd == "claude-post-tool":
+        if cmd == "claude-pre-tool":
+            _observe("pre")
+            result["observed"] = "pre"
+
+        elif cmd == "claude-post-tool":
+            _observe("post")
             result.update(handler.handle_claude_post_tool(data))
 
         elif cmd == "claude-stop":
+            distilled = _distill()
+            if distilled:
+                result["instincts"] = distilled
             result.update(handler.handle_claude_stop(data))
 
         elif cmd == "claude-session-end":
+            distilled = _distill()
+            if distilled:
+                result["instincts"] = distilled
             result.update(handler.handle_claude_transcript(data, "SessionEnd"))
 
         elif cmd == "claude-pre-compact":
