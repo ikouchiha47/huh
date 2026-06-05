@@ -637,7 +637,7 @@ Steps:
 
 **Episode source tracking:**
 ```yaml
-source_path: /Users/darksied/dev/ideas/wristturn/wristturn.ino
+source_path: /Users/you/dev/ideas/wristturn/wristturn.ino
 session_id: sess_20260501_xyz
 ```
 

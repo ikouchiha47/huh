@@ -1,4 +1,4 @@
-# /huh changelog — Record a changelog event
+# /memory changelog — Record a changelog event
 
 Capture what changed, why it matters, and the outcome at significant moments.
 

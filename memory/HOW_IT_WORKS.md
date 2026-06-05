@@ -544,7 +544,7 @@ def should_save(episode_content, metadata) -> bool:
 
 ```yaml
 Episode metadata:
-  source_path: /Users/darksied/dev/ideas/wristturn/wristturn.ino
+  source_path: /Users/you/dev/ideas/wristturn/wristturn.ino
                 └─────┬──────┘ └────┬────┘ └─┬─┘
                   project root   subdir   file
   session_id: sess_20260501_xyz
@@ -706,27 +706,20 @@ Ebbinghaus decay: each layer has different half-life.
 ## 🎓 Quick Start
 
 ```bash
-# Initialize
+# Install the CLI once (exposes `huh`, `crisp-hook`, `crisp-sense` on PATH)
+cd /path/to/huh/memory && uv tool install -e .
+
+# Use it from any project (memory auto-scopes to the project)
 cd /your/project
-python3 /path/to/memory_cli.py stats
+huh stats
 
-# Save something
-python3 memory_cli.py save "Fixed race condition in auth" \
-  --category bugfix \
-  --importance 0.9 \
-  --tags concurrency,auth
+huh save "Fixed race condition in auth" \
+  --category bugfix --importance 0.9 --tags concurrency,auth
 
-# Search
-python3 memory_cli.py search "auth bug" --limit 10
-
-# Reflect (consolidate)
-python3 memory_cli.py reflect
-
-# Prune old memories
-python3 memory_cli.py prune
-
-# View stats
-python3 memory_cli.py stats
+huh search "auth bug" --limit 10   # keyword; add --semantic for embeddings
+huh reflect                         # consolidate L0->L1->L2->L3
+huh prune                           # decay/archive
+huh instinct list                   # continuous-learning instincts
 ```
 
 ---
@@ -735,8 +728,9 @@ python3 memory_cli.py stats
 
 - `IMPLEMENTATION_SUMMARY.md` — What was built
 - `VALIDATION_AND_INTEGRATION.md` — PageIndex + Windsurf integration ideas
-- `/Users/darksied/dev/ideas/huh/ai-memory-skill.md` — Research background (A-MEM, MemGPT, CoALA)
-- Plan: `.kilo/plans/1777628646712-crisp-engine.md`
+- `../ai-memory-skill.md` — Research background (A-MEM, MemGPT, CoALA)
+- `HOOKS_CONFIG.md` — wiring `crisp-hook` into Claude Code
+- `../skills/memory/instincts.md` — the continuous-learning instinct engine
 
 ---
 

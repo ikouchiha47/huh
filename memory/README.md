@@ -1,21 +1,24 @@
 # Crisp Engine — Episodic Memory for AI Agents
 
 Automatic, layered memory for Claude Code sessions. Every file you edit, every
-correction you give, every session you run — captured, summarised, and promoted
+correction you give, every tool you run — captured, summarised, and promoted
 through four layers so future sessions carry what past ones learned.
 
 ```
-Edit file  →  L0 episode (raw diff + symbols)
-              ↓ every 20 episodes
-           L1 session summary
-              ↓ every 10 summaries on same topic
-           L2 topic cluster
-              ↓ every 3 clusters
-           L3 life arc (permanent)
+Tool use / edit  →  L0 episode (raw diff + symbols, or a tool observation)
+                    ↓ every ~20 episodes
+                 L1 session summary
+                    ↓ clustered by topic
+                 L2 topic cluster   ← instincts also live here
+                    ↓ promoted
+                 L3 life arc (permanent)
 ```
 
-Memory is **global** — stored in `~/.claude/memory/`, shared across all projects.
-A bug fixed in one repo surfaces when you hit the same pattern elsewhere.
+Memory is **per-project by default**: each project gets its own store under
+`~/.claude/memory/projects/<id>/` (auto-detected from the working directory / git
+root). Work in project A stays in A. A separate **global** store
+(`~/.claude/memory/`) is used when you're not inside a project, and is where
+cross-project **instincts** graduate (see below).
 
 ---
 
@@ -23,109 +26,112 @@ A bug fixed in one repo surfaces when you hit the same pattern elsewhere.
 
 | Hook | Fires when | What gets stored |
 |---|---|---|
-| `PostToolUse` (Write/Edit) | You edit a file | git diff + extracted symbols → L0 |
-| `Stop` | Claude finishes a turn | Corrections and frustration signals → L0 |
-| `PreCompact` | Context window fills | Last 30 conversation turns → L0, then full cascade |
+| `PreToolUse` / `PostToolUse` | Any tool runs | A tool-use **observation** (instinct engine); PostToolUse also lazily indexes edited/read files → L0 |
+| `Stop` | Claude finishes a turn | Distills observations into instincts; corrections/frustration → L0 |
+| `PreCompact` | Context window fills | Last conversation turns → L0, then full cascade |
 | `SessionEnd` | Session closes | Conversation transcript → L0, then full cascade |
 
 The cascade (`L0→L1→L2→L3`) runs automatically at `PreCompact` and `SessionEnd`.
-Each layer has a decay half-life: L0=30d, L1=180d, L2=2yr, L3=permanent.
+Each layer has a decay half-life: **L0 = 1 day, L1 = 7 days, L2 = 30 days, L3 = permanent**.
+Reinforcement (re-seeing the same content/pattern) bumps access and resets decay.
 
-All layers write to `~/.claude/memory/` regardless of which project you're in.
-Episodes are tagged with `source_path` so you can filter by project if needed.
+### Continuous-learning instincts
+
+Tool-use observations are distilled into **instincts** — confidence-scored behaviors
+(an episode with `category="instinct"` at L2). They `reinforce` on recurrence,
+`evolve` into emitted skills/commands/agents, and `promote` project→global once a
+signature is seen in ≥2 projects. See `../skills/memory/instincts.md`.
+
+### Semantic search (opt-in)
+
+`huh search` is keyword/structured by default. `huh search --semantic` uses
+embeddings — **user-triggered only**, never on the automatic path. The provider is
+configurable (`embedding_provider`: `mock` default, or `ollama` with a configurable
+model + API route). A persistent vector index (sqlite) is on the roadmap; today the
+mock keeps the path exercised and `ollama` computes on the fly.
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/ikouchiha47/huh
-uv tool install ./huh/memory
+git clone git@github.com:ikouchiha47/huh
+uv tool install -e ./huh/memory   # editable: tracks the repo
 ```
 
 This installs three commands into `~/.local/bin/`:
 
-| Command | Purpose |
-|---|---|
-| `huh` | CLI — search, reflect, stats, prune |
-| `crisp-hook` | Hook entry point wired into `.claude/settings.json` |
-| `crisp-sense` | Standalone file analyser |
+| Command | Maps to | Purpose |
+|---|---|---|
+| `huh` | `lib.cli:main` | CLI — search, reflect, stats, prune, `instinct …` |
+| `crisp-hook` | `lib.hooks:main` | hook entry point wired into `.claude/settings.json` |
+| `crisp-sense` | `lib.crisp_sense:main` | standalone file analyser |
 
-For **fish shell**, ensure `~/.local/bin` is on your PATH:
+For **fish**, ensure `~/.local/bin` is on PATH: `fish_add_path ~/.local/bin`.
 
-```fish
-fish_add_path ~/.local/bin
-```
-
-After updates, reinstall to pick up changes:
-
-```bash
-uv tool install ./huh/memory
-```
+The `/memory` skill lives in `../skills/memory/` (install via the repo `Makefile`'s
+`make link`, or copy it to `~/.claude/skills/memory/`).
 
 ---
 
 ## Wire into Claude Code
 
-Add to `.claude/settings.json` in any project:
+See **`HOOKS_CONFIG.md`** for the full setup. Minimal passive learning — add to
+`~/.claude/settings.json` (`async` so observers add no latency and never block a tool):
 
 ```json
 {
   "hooks": {
-    "PostToolUse": [{
-      "matcher": "Write|Edit|MultiEdit",
-      "hooks": [{ "type": "command", "command": "crisp-hook", "args": ["claude-post-tool"], "timeout": 10 }]
-    }],
-    "Stop": [{
-      "hooks": [{ "type": "command", "command": "crisp-hook", "args": ["claude-stop"], "timeout": 10 }]
-    }],
-    "SessionEnd": [{
-      "hooks": [{ "type": "command", "command": "crisp-hook", "args": ["claude-session-end"], "timeout": 30 }]
-    }],
-    "PreCompact": [{
-      "hooks": [{ "type": "command", "command": "crisp-hook", "args": ["claude-pre-compact"], "timeout": 30 }]
-    }]
+    "PreToolUse":  [{ "matcher": "*", "hooks": [{ "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-pre-tool",  "async": true, "timeout": 10 }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-post-tool", "async": true, "timeout": 10 }] }],
+    "Stop":        [{ "hooks": [{ "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-stop", "async": true, "timeout": 10 }] }]
   }
 }
 ```
+
+After editing settings, open `/hooks` once (or restart) so Claude Code reloads them.
 
 ---
 
 ## CLI usage
 
 ```bash
-huh stats                     # layer counts, cache size
-huh search "JWT validation"   # keyword search across all layers
-huh reflect                   # manually trigger L0→L1→L2→L3 cascade
-huh prune                     # remove decayed episodes
-huh save "note" --permanent   # save a permanent note
+huh stats                       # layer counts, cache size
+huh search "JWT validation"     # keyword search; add --semantic for embeddings
+huh reflect                     # manually trigger L0→L1→L2→L3 cascade
+huh prune                       # remove decayed episodes
+huh save "note" --permanent     # save a permanent note
+huh instinct list               # learned behaviors for this project
+huh instinct evolve             # emit a skill from high-confidence instincts
 ```
 
-Or type `/huh` in Claude Code (copy `commands/huh.md` from this repo to `~/.claude/commands/`).
+In Claude Code the skill is **`/memory`** (subcommands route to the `huh` CLI).
 
 ---
 
 ## Storage layout
 
-Everything lives in `~/.claude/memory/` — **global, not per-project**:
+Per-project store (the default), with a global store at the same shape:
 
 ```
 ~/.claude/memory/
-  layers/
-    l0/   raw episodes (.md, 30-day decay)
-    l1/   session summaries (.md, 180-day decay)
-    l2/   topic clusters (.md, 2-year decay)
-    l3/   life arcs (.md, permanent)
+  projects/<id>/        per-project store (layers/, cache/, config/, observations/, evolved/)
+  layers/               global store (used outside a project; promoted instincts)
+    l0/  raw episodes (.md, 1-day half-life)
+    l1/  session summaries (.md, 7-day)
+    l2/  topic clusters + instincts (.md, 30-day)
+    l3/  life arcs (.md, permanent)
   cache/
-    hashes.json       content-hash dedup index
-    file_states.json  per-file change detection
-    links.json        episode graph edges
-  config/
-    config.json
+    hashes.json         content-hash dedup index
+    file_states.json    per-file change detection
+    links.json          episode graph edges
+  config/config.json
+  observations/         append-only tool-use buffers (instinct engine)
+  evolved/              skills/commands/agents emitted by `instinct evolve`
 ```
 
 Episodes are plain markdown with YAML frontmatter — readable in any editor,
-diff-friendly in git. SQLite-backed FTS is on the roadmap for scale.
+diff-friendly in git. A SQLite vector index is on the roadmap for semantic scale.
 
 ---
 
@@ -133,18 +139,21 @@ diff-friendly in git. SQLite-backed FTS is on the roadmap for scale.
 
 ```
 lib/
-  hooks.py      Claude Code hook handlers + payload translation
-  store.py      IMemoryStore interface + FileStore implementation
-  analyzer.py   Code symbol extractor (tree-sitter, regex fallback)
-  reflector.py  L0→L1→L2→L3 consolidation pipeline
-  retrieve.py   Multi-layer search + graph expansion + reranking
-  prune.py      Ebbinghaus decay pruning
-  cli.py        huh CLI entry point
-  crisp_sense.py  standalone file analyser
+  hooks.py       Claude Code hook handlers + payload translation
+  store.py       IMemoryStore interface + MD FileStore (+ confidence, update_episode)
+  instincts.py   continuous-learning: observe → distill → reinforce → evolve → promote
+  embeddings.py  pluggable embedding providers (mock default, ollama optional)
+  analyzer.py    code symbol extractor (tree-sitter, regex fallback)
+  reflector.py   L0→L1→L2→L3 consolidation pipeline
+  retrieve.py    multi-layer search + graph expansion + reranking
+  prune.py       Ebbinghaus decay pruning
+  cli.py         huh CLI entry point
+  crisp_sense.py standalone file analyser
+  project_memory.py  per-project store resolution
 ```
 
 The `IMemoryStore` interface makes the storage backend swappable — a `SQLiteStore`
-can be dropped in without changing anything else.
+(and a vector index) can be dropped in without changing anything else.
 
 ---
 

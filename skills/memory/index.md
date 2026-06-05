@@ -1,4 +1,4 @@
-# /huh index — Index a file into memory
+# /memory index — Index a file into memory
 
 Index a file at symbol + file level. Optionally create a dir-level summary if the parent isn't indexed yet.
 

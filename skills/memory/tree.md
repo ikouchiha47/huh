@@ -1,4 +1,4 @@
-# /huh tree — Project tree with index status
+# /memory tree — Project tree with index status
 
 Show the project's file structure alongside what is and isn't indexed in memory.
 
@@ -19,7 +19,7 @@ Output shows tracked files (via `git ls-files`) up to 3 levels deep, with marker
 
 ### 2. Interpret the output
 
-- Files with no marker are candidates for `/huh index <path>`
+- Files with no marker are candidates for `/memory index <path>`
 - Files marked `~` have changed since their last index — re-index them before relying on cached summaries
 - Use the tree to decide which directories need a `dir` or `module` level summary
 

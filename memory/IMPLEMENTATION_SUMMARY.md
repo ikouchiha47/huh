@@ -201,26 +201,20 @@ All 8 tests pass:
 
 ### Save Memory
 ```bash
-python3 memory_cli.py save "Fixed auth bug" \
-  --category bugfix \
-  --importance 0.9 \
-  --tags auth,jwt \
-  --permanent
+huh save "Fixed auth bug" \
+  --category bugfix --importance 0.9 --tags auth jwt --permanent
 ```
 
 ### Search
 ```bash
-python3 memory_cli.py search "authentication" --layer l0 --limit 10
+huh search "authentication" --limit 10      # keyword; add --semantic for embeddings
 ```
 
-### Consolidate
+### Consolidate / Prune / Instincts
 ```bash
-python3 memory_cli.py reflect
-```
-
-### Prune
-```bash
-python3 memory_cli.py prune
+huh reflect          # consolidate L0->L1->L2->L3
+huh prune            # decay/archive
+huh instinct list    # continuous-learning instincts
 ```
 
 ## AI Agent Implementation (No Code)
@@ -234,40 +228,27 @@ No Python required!
 
 ## Configuration
 
-`~/.claude/memory/config/config.json`:
+Per-store config lives at `<store>/config/config.json` (defaults baked into
+`lib/store.py`):
 ```json
 {
-  "decay_half_life_days": {
-    "l0": 30,
-    "l1": 180,
-    "l2": 730,
-    "l3": 2190
-  },
+  "decay_half_life_days": { "l0": 1, "l1": 7, "l2": 30, "l3": 36500 },
   "importance_threshold": 0.3,
   "similarity_threshold": 0.92,
-  "reflection_interval": 20
+  "reflection_interval": 20,
+  "embedding_provider": "mock",
+  "embedding_model": "qllama/bge-large-en-v1.5:latest",
+  "embedding_api_url": "http://localhost:11434/api/embeddings",
+  "instincts": { "enabled": true, "min_observations": 20, "evolve_threshold": 0.8 }
 }
 ```
 
 ## Hook Configuration
 
-`~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "SessionEnd": {
-      "type": "command",
-      "command": "memory",
-      "args": ["auto-checkpoint"]
-    },
-    "Stop": {
-      "type": "agent",
-      "agent": "memory",
-      "matcher": "correction|frustration"
-    }
-  }
-}
-```
+See **`HOOKS_CONFIG.md`** for the current setup. In short: register `crisp-hook`
+on Claude Code's `PreToolUse`/`PostToolUse`/`Stop` (and optionally
+`SessionEnd`/`PreCompact`) using the array-of-matchers schema — e.g.
+`"$HOME/.local/bin/crisp-hook" claude-pre-tool` as an `async` command hook.
 
 ## Success Metrics
 
