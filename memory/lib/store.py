@@ -101,6 +101,11 @@ class MemoryEpisode:
                         else datetime.now(timezone.utc).isoformat()
                     )
                 )
+        # YAML safe_load may parse ISO timestamps into datetime objects; normalize to str
+        if isinstance(data.get("timestamp"), datetime):
+            data["timestamp"] = data["timestamp"].isoformat()
+        if isinstance(data.get("last_accessed"), datetime):
+            data["last_accessed"] = data["last_accessed"].isoformat()
         return cls(**data)
 
 
