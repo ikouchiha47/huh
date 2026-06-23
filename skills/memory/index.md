@@ -35,7 +35,7 @@ Valid `--level` values and what they represent:
 | `project` | The whole repo | L2 | Top-level architecture, major components, purpose |
 
 ```bash
-huh save-index --path <path> --level file --summary "<your summary>"
+huh save-index --path <path> --level file --content "<your summary>"
 ```
 
 ### 3. Dir-level summary (if not yet indexed)
@@ -49,7 +49,7 @@ If no results → write a dir-level summary:
 - Key files and their roles (one phrase each)
 
 ```bash
-huh save-index --path <parent_dir> --level dir --summary "<your dir summary>"
+huh save-index --path <parent_dir> --level dir --content "<your dir summary>"
 ```
 
 ### 4. Consider higher levels

@@ -54,18 +54,50 @@ latency** and can never block/deny a tool — they are pure observation.
         "hooks": [
           { "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-stop", "async": true, "timeout": 10 }
         ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"$HOME/.claude/hooks/memory-session-end.sh\"", "async": true, "timeout": 15 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-session-end", "timeout": 30 }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-pre-compact", "timeout": 30 }
+        ]
       }
     ]
   }
 }
 ```
 
-Optional, for consolidation at the end of a session / before compaction:
+`Stop` fires after every Claude response — use it for fast async work (instinct distillation, stale-file checkpoint). `SessionEnd` and `PreCompact` run synchronously and trigger L0→L1→L2→L3 consolidation; they should not be async.
 
-```json
-"SessionEnd": [ { "hooks": [ { "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-session-end", "timeout": 30 } ] } ],
-"PreCompact": [ { "hooks": [ { "type": "command", "command": "\"$HOME/.local/bin/crisp-hook\" claude-pre-compact", "timeout": 30 } ] } ]
+### memory-session-end.sh (Stop hook)
+
+This companion script checkpoints which source files were modified during the session so the next session knows which index entries are stale:
+
+```bash
+#!/bin/bash
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null | grep -E '\.(ts|tsx|kt|sql)$')
+staged=$(git -C "$PROJECT_DIR" diff --name-only --cached 2>/dev/null | grep -E '\.(ts|tsx|kt|sql)$')
+changed=$(printf '%s\n%s' "$unstaged" "$staged" | sort -u | grep -v '^$')
+if [ -n "$changed" ]; then
+  file_list=$(echo "$changed" | tr '\n' ' ' | sed 's/ $//')
+  huh checkpoint --note "Session ended. Modified files may need re-indexing: $file_list" 2>/dev/null || true
+fi
 ```
+
+Install to `~/.claude/hooks/memory-session-end.sh` and `chmod +x` it.
 
 After editing settings, open **`/hooks`** once (or restart) so Claude Code reloads the
 config — otherwise the new hooks won't fire until the watcher picks them up.
