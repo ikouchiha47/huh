@@ -299,9 +299,9 @@ class MemoryReflector:
             for topic, ids in categories.items():
                 if len(ids) >= 10:
                     l2 = self.generate_l2_cluster(ids[:10], topic)
-                if l2:
-                    self.store.save_episode(l2)
-                    result["l2_created"] += 1
+                    if l2:
+                        self.store.save_episode(l2)
+                        result["l2_created"] += 1
 
         # L2 → L3 (if we have multiple clusters)
         l2_episodes = self.store.list_episodes(layer=2)
